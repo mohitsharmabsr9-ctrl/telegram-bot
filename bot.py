@@ -12,7 +12,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Dynamic Full Market Screener Bot is Running!"
+    return "Dynamic NSE Market Screener Bot is Active!"
 
 def run():
     port = int(os.environ.get("PORT", 10000))
@@ -33,39 +33,18 @@ def clean_df(df):
         df.columns = df.columns.get_level_values(0)
     return df
 
-def get_nse_total_market_tickers():
-    """NSE Nifty Total Market (500 Stocks) List dynamically fetch karta hai"""
-    url = "https://archives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
-    symbols = []
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            lines = res.text.splitlines()
-            # CSV Parsing
-            for line in lines[1:]:
-                parts = line.split(',')
-                if len(parts) > 2:
-                    symbol = parts[2].strip().replace('"', '')
-                    if symbol and symbol != "Symbol":
-                        symbols.append(symbol + ".NS")
-    except Exception as e:
-        print(f"Error fetching NSE List: {e}")
-        
-    # Backup listagar NSE website fetch block kare
-    if not symbols:
-        symbols = [
-            "TATAMOTORS.NS", "TATASTEEL.NS", "RELIANCE.NS", "HDFCBANK.NS", "INFY.NS",
-            "SBIN.NS", "ICICIBANK.NS", "ITC.NS", "COALINDIA.NS", "IOC.NS", "ONGC.NS",
-            "YESBANK.NS", "SUZLON.NS", "IDFCFIRSTB.NS", "SOUTHBANK.NS", "UCOBANK.NS",
-            "IOB.NS", "NHPC.NS", "IRFC.NS", "HUDCO.NS", "SJVN.NS", "SWSOLAR.NS",
-            "PNB.NS", "BANKBARODA.NS", "GMRINFRA.NS", "IDEA.NS", "ZOMATO.NS", "JIOFIN.NS"
-        ]
-    return list(set(symbols))
-
-# Global ticker list cache
-NSE_TICKERS = get_nse_total_market_tickers()
+# Reliable NSE Market Pool
+NSE_TICKERS = [
+    # Under ₹100 / Low Cap
+    "YESBANK.NS", "SUZLON.NS", "IDFCFIRSTB.NS", "SOUTHBANK.NS", "UCOBANK.NS",
+    "IOB.NS", "NHPC.NS", "IRFC.NS", "HUDCO.NS", "SJVN.NS", "SWSOLAR.NS",
+    "PNB.NS", "IDEA.NS", "ZOMATO.NS", "JIOFIN.NS", "IOC.NS", "TATASTEEL.NS",
+    # Mid & Large Cap
+    "TATAMOTORS.NS", "RELIANCE.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS",
+    "ICICIBANK.NS", "ITC.NS", "COALINDIA.NS", "ONGC.NS", "BPCL.NS",
+    "NTPC.NS", "POWERGRID.NS", "GAIL.NS", "FEDERALBNK.NS", "ASHOKLEY.NS",
+    "TCS.NS", "BHARTIARTL.NS", "AXISBANK.NS", "WIPRO.NS", "LT.NS"
+]
 
 @bot.message_handler(func=lambda message: message.text and message.text.upper() in ['NIFTY', 'BANKNIFTY', 'NIFTY 50', 'BANK NIFTY'])
 def handle_index(message):
@@ -117,12 +96,10 @@ def handle_under_stocks(message):
         return
         
     max_price = float(match.group())
-    bot.reply_to(message, f"🔍 Entire NSE Market Scanning for Best Stocks under ₹{int(max_price)}... (Please wait 5-8 seconds)")
+    bot.reply_to(message, f"🔍 Scanning Market for Best Stocks under ₹{int(max_price)}... (Please wait 3-5 seconds)")
     
     try:
-        # Bulk download all NSE Market stocks
         batch_data = yf.download(NSE_TICKERS, period="5d", interval="1d", group_by='ticker', progress=False)
-        
         candidates = []
         
         for symbol in NSE_TICKERS:
@@ -136,8 +113,7 @@ def handle_under_stocks(message):
                 close = float(df['Close'].iloc[-1])
                 prev_close = float(df['Close'].iloc[-2])
                 
-                # Filter 1: Price Budget Filter
-                if close <= max_price and close >= 2: # Min ₹2 to avoid illiquid micro-pennies
+                if close <= max_price and close >= 2:
                     pct_change = ((close - prev_close) / prev_close) * 100
                     clean_symbol = symbol.replace('.NS', '')
                     
@@ -150,19 +126,18 @@ def handle_under_stocks(message):
                 continue
 
         if candidates:
-            # Sort by highest momentum / price gains to pick Top 5 Best stocks
             candidates.sort(key=lambda x: x['change'], reverse=True)
             top_5 = candidates[:5]
             
-            response = f"🌟 **Top 5 Best Momentum Stocks Under ₹{int(max_price)}**\n_(Picked from entire NSE Market Universe)_\n\n"
+            response = f"🌟 **Top 5 Best Momentum Stocks Under ₹{int(max_price)}**\n\n"
             
             for index, stock in enumerate(top_5, 1):
                 sym = stock['symbol']
                 price = stock['price']
                 chg = stock['change']
                 
-                sl = round(price * 0.97, 2)     # 3% Stop-Loss
-                target = round(price * 1.06, 2) # 6% Target Price
+                sl = round(price * 0.97, 2)
+                target = round(price * 1.06, 2)
                 
                 response += (
                     f"**{index}. {sym}**\n"
@@ -173,10 +148,10 @@ def handle_under_stocks(message):
                 
             bot.reply_to(message, response, parse_mode='Markdown')
         else:
-            bot.reply_to(message, f"❌ ₹{int(max_price)} ke niche poore market me koi active stock nahi mila.")
+            bot.reply_to(message, f"❌ ₹{int(max_price)} ke niche koi active stock nahi mila.")
 
     except Exception as e:
         bot.reply_to(message, f"❌ Scanning Error: {str(e)}")
 
-print("🚀 Dynamic NSE Market Screener Bot is running...")
+print("🚀 Bot is running...")
 bot.polling()
