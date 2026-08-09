@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 import re
 
-TELEGRAM_BOT_TOKEN = "8650177978:AAF0sf-wP3ZH5OcHCo0RAbiJRsIZlNp89e8"
+TELEGRAM_BOT_TOKEN = "8650177978:AAF0sf-wP3ZH5OcHCO0RAbiJRsIZlNp89e8"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 STOCK_POOL = {
@@ -12,155 +12,113 @@ STOCK_POOL = {
     "COAL INDIA": "COALINDIA.NS",
     "ITC": "ITC.NS",
     "TATA MOTORS": "TATAMOTORS.NS",
+    "ONGC": "ONGC.NS",
+    "BPCL": "BPCL.NS",
+    "NTPC": "NTPC.NS",
+    "POWERGRID": "POWERGRID.NS",
+    "GAIL": "GAIL.NS",
+    "FEDERAL BANK": "FEDERALBNK.NS",
+    "ASHOK LEYLAND": "ASHOKLEY.NS",
+    "HDFCBANK": "HDFCBANK.NS",
+    "ICICIBANK": "ICICIBANK.NS",
     "SBIN": "SBIN.NS",
-    "AXIS BANK": "AXISBANK.NS",
-    "ICICI BANK": "ICICIBANK.NS",
-    "INFY": "INFY.NS",
     "RELIANCE": "RELIANCE.NS",
-    "L&T": "LT.NS",
-    "BAJFINANCE": "BAJFINANCE.NS",
-    "MARUTI": "MARUTI.NS",
-    "ULTRACEMCO": "ULTRACEMCO.NS",
-    "TCS": "TCS.NS"
+    "INFY": "INFY.NS",
+    "TCS": "TCS.NS",
+    "AXISBANK": "AXISBANK.NS",
+    "BHARTIARTL": "BHARTIARTL.NS",
+    "LT": "LT.NS",
+    "WIPRO": "WIPRO.NS",
+    "HCLTECH": "HCLTECH.NS"
 }
 
-def calculate_indicators(symbol):
-    df = yf.download(tickers=symbol, period="5d", interval="5m", progress=False)
-    if df.empty:
-        return None
-    
-    close_price = df['Close'].iloc[:, 0] if isinstance(df['Close'], pd.DataFrame) else df['Close']
-    
-    ema9 = close_price.ewm(span=9, adjust=False).mean()
-    ema21 = close_price.ewm(span=21, adjust=False).mean()
-    
-    delta = close_price.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    
-    return {
-        'price': float(close_price.iloc[-1]),
-        'ema9': float(ema9.iloc[-1]),
-        'ema21': float(ema21.iloc[-1]),
-        'rsi': float(rsi.iloc[-1])
-    }
+# Fix DataFrame multi-index issue in newer yfinance versions
+def clean_df(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
 
-@bot.message_handler(func=lambda message: True)
-def process_signal(message):
-    text = message.text.upper().strip()
+# Handle Index (NIFTY & BANKNIFTY)
+@bot.message_handler(func=lambda message: message.text and message.text.upper() in ['NIFTY', 'BANKNIFTY', 'NIFTY 50', 'BANK NIFTY'])
+def handle_index(message):
+    text = message.text.upper()
+    ticker = "^NSEI" if "NIFTY" in text and "BANK" not in text else "^NSEBANK"
+    index_name = "NIFTY 50" if ticker == "^NSEI" else "BANK NIFTY"
     
-    numbers = re.findall(r'\d+', text)
-    if "UNDER" in text or "BELOW" in text or numbers:
-        if numbers and text not in ["NIFTY", "BANKNIFTY"]:
-            max_price = float(numbers[0])
-            bot.reply_to(message, f"⏳ ₹{max_price:.0f} ke niche waale stocks ka exact Buy/Target/SL levels calculate ho raha hai...")
-            
-            matching_stocks = []
-            
-            for name, ticker in STOCK_POOL.items():
-                try:
-                    data = calculate_indicators(ticker)
-                    if data and data['price'] <= max_price:
-                        matching_stocks.append((name, data))
-                        if len(matching_stocks) == 5:
-                            break
-                except Exception:
-                    continue
-            
-            if not matching_stocks:
-                bot.send_message(message.chat.id, f"❌ ₹{max_price:.0f} ke niche koi stock nahi mila.")
-                return
-
-            report = f"🔥 **TOP STOCKS UNDER ₹{max_price:.0f} (WITH TARGET/SL)** 🔥\n─────────────────────────\n"
-            for name, data in matching_stocks:
-                price = data['price']
-                rsi = data['rsi']
-                ema9 = data['ema9']
-                ema21 = data['ema21']
-                
-                # Dynamic SL & Target calculation (1.5% Risk-Reward)
-                sl_val = round(price * 0.01, 2)       # 1% Stop Loss
-                t1_val = round(price * 0.015, 2)     # 1.5% Target 1
-                t2_val = round(price * 0.03, 2)      # 3% Target 2
-                
-                if ema9 > ema21 and rsi > 50:
-                    action = "🟢 BUY"
-                    entry = f"Around ₹{price:.2f}"
-                    sl = f"₹{price - sl_val:.2f}"
-                    targets = f"T1: ₹{price + t1_val:.2f} | T2: ₹{price + t2_val:.2f}"
-                elif ema9 < ema21 and rsi < 50:
-                    action = "🔴 SHORT SELL"
-                    entry = f"Around ₹{price:.2f}"
-                    sl = f"₹{price + sl_val:.2f}"
-                    targets = f"T1: ₹{price - t1_val:.2f} | T2: ₹{price - t2_val:.2f}"
-                else:
-                    action = "🟡 SIDEWAYS (NO ENTRY)"
-                    entry = "N/A"
-                    sl = "N/A"
-                    targets = "N/A"
-                    
-                report += f"📌 **{name}**\n• CMP: ₹{price:.2f}\n• Action: {action}\n• Entry: {entry}\n• SL: {sl}\n• Targets: {targets}\n─────────────────────────\n"
-            
-            bot.send_message(message.chat.id, report, parse_mode='Markdown')
-            return
-
-    if text == "BANKNIFTY":
-        symbol = "^NSEBANK"
-        step = 100
-        sl_pts = 35
-    elif text == "NIFTY":
-        symbol = "^NSEI"
-        step = 50
-        sl_pts = 15
-    else:
-        bot.reply_to(message, "⚠️ Direct likhein: **under 400**, **under 1000**, **NIFTY**, ya **BANKNIFTY**")
-        return
-
+    bot.reply_to(message, f"⏳ **{index_name}** ka technical analysis calculate ho raha hai...")
+    
     try:
-        data = calculate_indicators(symbol)
-        if not data:
-            bot.reply_to(message, "❌ Data fetch error.")
+        data = yf.download(ticker, period="5d", interval="1d", progress=False)
+        
+        if data.empty:
+            bot.reply_to(message, f"❌ {index_name} ka data fetch nahi ho paya.")
             return
 
-        price = data['price']
-        ema9 = data['ema9']
-        ema21 = data['ema21']
-        rsi = data['rsi']
-        atm_strike = round(price / step) * step
-        
-        if ema9 > ema21 and rsi > 50:
-            signal_type = "BUY CALL (CE)"
-            instrument = f"{text} {atm_strike} CE"
-            status = "🟢 BULLISH BREAKOUT"
-        elif ema9 < ema21 and rsi < 50:
-            signal_type = "BUY PUT (PE)"
-            instrument = f"{text} {atm_strike} PE"
-            status = "🔴 BEARISH BREAKDOWN"
-        else:
-            signal_type = "NO TRADE (SIDEWAYS)"
-            instrument = "N/A"
-            status = "🟡 NEUTRAL / CONSOLIDATION"
+        data = clean_df(data)
 
-        reply = f"""
-📊 **ACCURATE ALGO SIGNAL: {text}**
-─────────────────────────
-📍 **Spot Price:** {price:.2f}
-📈 **Trend Status:** {status}
-🎯 **Action:** {signal_type}
-🏷️ **Suggested Instrument:** {instrument}
-─────────────────────────
-🔍 **Indicators Data:**
-• **RSI (14):** {rsi:.1f}
-• **EMA 9 vs 21:** {'Above' if ema9 > ema21 else 'Below'}
-─────────────────────────
-🛑 **SL:** {sl_pts} Points
-🎯 **Target:** {sl_pts * 2} Points (1:2 RR)
-"""
+        latest_close = float(data['Close'].iloc[-1])
+        prev_close = float(data['Close'].iloc[-2]) if len(data) > 1 else latest_close
+        change = latest_close - prev_close
+        p_change = (change / prev_close) * 100
+
+        high = float(data['High'].iloc[-1])
+        low = float(data['Low'].iloc[-1])
+        
+        pivot = (high + low + latest_close) / 3
+        r1 = (2 * pivot) - low
+        s1 = (2 * pivot) - high
+
+        reply = (
+            f"📊 **{index_name} Analysis**\n\n"
+            f"🔹 **CMP:** ₹{latest_close:.2f} ({'+' if change >= 0 else ''}{change:.2f} | {p_change:.2f}%)\n"
+            f"📈 **Day High:** ₹{high:.2f}\n"
+            f"📉 **Day Low:** ₹{low:.2f}\n\n"
+            f"🎯 **Pivot Levels:**\n"
+            f"• **Resistance (R1):** ₹{r1:.2f}\n"
+            f"• **Pivot Point:** ₹{pivot:.2f}\n"
+            f"• **Support (S1):** ₹{s1:.2f}"
+        )
         bot.reply_to(message, reply, parse_mode='Markdown')
+
     except Exception as e:
         bot.reply_to(message, f"❌ Error: {str(e)}")
+
+# Handle "under XXX" stock queries
+@bot.message_handler(func=lambda message: message.text and "under" in message.text.lower())
+def handle_under_stocks(message):
+    match = re.search(r'\d+', message.text)
+    if not match:
+        bot.reply_to(message, "❌ Kripya amount specify karein (e.g. `under 500`)")
+        return
+        
+    max_price = float(match.group())
+    bot.reply_to(message, f"⏳ ₹{int(max_price)} ke niche waale stocks scan ho rahe hain...")
+    
+    found_stocks = []
+    
+    for name, symbol in STOCK_POOL.items():
+        try:
+            df = yf.download(symbol, period="5d", interval="1d", progress=False)
+            if df.empty:
+                continue
+            
+            df = clean_df(df)
+            close = float(df['Close'].iloc[-1])
+            
+            if close <= max_price:
+                high = float(df['High'].iloc[-1])
+                low = float(df['Low'].iloc[-1])
+                sl = round(close * 0.98, 2)
+                target = round(close * 1.04, 2)
+                found_stocks.append(f"📌 **{name}**\n• CMP: ₹{close:.2f}\n• Target: ₹{target}\n• SL: ₹{sl}\n")
+        except:
+            continue
+
+    if found_stocks:
+        response = f"🎯 **Stocks Under ₹{int(max_price)}:**\n\n" + "\n".join(found_stocks[:5])
+        bot.reply_to(message, response, parse_mode='Markdown')
+    else:
+        bot.reply_to(message, f"❌ ₹{int(max_price)} ke niche koi stock nahi mila.")
 
 print("🚀 Level-Based Target/SL Bot is running...")
 bot.polling()
