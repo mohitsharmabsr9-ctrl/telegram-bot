@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 import re
 
-TELEGRAM_BOT_TOKEN = "8650177978:AAF0sf-wP3ZH5OcHCO0RAbiJRsIZlNp89e8"
+TELEGRAM_BOT_TOKEN = "8650177978:AAF1skxO0zeQCwsq22p-YNqqWo_Eb0QpTp4"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 STOCK_POOL = {
