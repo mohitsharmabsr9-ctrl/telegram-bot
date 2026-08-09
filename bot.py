@@ -2,8 +2,29 @@ import telebot
 import yfinance as yf
 import pandas as pd
 import re
+import os
+from flask import Flask
+import threading
 
-TELEGRAM_BOT_TOKEN = "8650177978:AAF1skxO0zeQCwsq22p-YNqqWo_Eb0QpTp4"
+# Flask Keep-Alive Server
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running fast!"
+
+def run():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = threading.Thread(target=run)
+    t.start()
+
+keep_alive()
+
+# Telegram Bot Config
+TELEGRAM_BOT_TOKEN = "8650177978:AAF0sf-wP3ZH5OcHCO0RAbiJRsIZlNp89e8"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 STOCK_POOL = {
@@ -24,38 +45,29 @@ STOCK_POOL = {
     "SBIN": "SBIN.NS",
     "RELIANCE": "RELIANCE.NS",
     "INFY": "INFY.NS",
-    "TCS": "TCS.NS",
-    "AXISBANK": "AXISBANK.NS",
-    "BHARTIARTL": "BHARTIARTL.NS",
-    "LT": "LT.NS",
-    "WIPRO": "WIPRO.NS",
-    "HCLTECH": "HCLTECH.NS"
+    "TCS": "TCS.NS"
 }
 
-# Fix DataFrame multi-index issue in newer yfinance versions
 def clean_df(df):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
 
-# Handle Index (NIFTY & BANKNIFTY)
 @bot.message_handler(func=lambda message: message.text and message.text.upper() in ['NIFTY', 'BANKNIFTY', 'NIFTY 50', 'BANK NIFTY'])
 def handle_index(message):
     text = message.text.upper()
     ticker = "^NSEI" if "NIFTY" in text and "BANK" not in text else "^NSEBANK"
     index_name = "NIFTY 50" if ticker == "^NSEI" else "BANK NIFTY"
     
-    bot.reply_to(message, f"⏳ **{index_name}** ka technical analysis calculate ho raha hai...")
+    bot.reply_to(message, f"⏳ **{index_name}** analysis loading...")
     
     try:
         data = yf.download(ticker, period="5d", interval="1d", progress=False)
-        
         if data.empty:
             bot.reply_to(message, f"❌ {index_name} ka data fetch nahi ho paya.")
             return
 
         data = clean_df(data)
-
         latest_close = float(data['Close'].iloc[-1])
         prev_close = float(data['Close'].iloc[-2]) if len(data) > 1 else latest_close
         change = latest_close - prev_close
@@ -83,7 +95,6 @@ def handle_index(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Error: {str(e)}")
 
-# Handle "under XXX" stock queries
 @bot.message_handler(func=lambda message: message.text and "under" in message.text.lower())
 def handle_under_stocks(message):
     match = re.search(r'\d+', message.text)
@@ -92,33 +103,39 @@ def handle_under_stocks(message):
         return
         
     max_price = float(match.group())
-    bot.reply_to(message, f"⏳ ₹{int(max_price)} ke niche waale stocks scan ho rahe hain...")
+    bot.reply_to(message, f"⚡ ₹{int(max_price)} ke niche waale stocks instant scan ho rahe hain...")
     
-    found_stocks = []
-    
-    for name, symbol in STOCK_POOL.items():
-        try:
-            df = yf.download(symbol, period="5d", interval="1d", progress=False)
-            if df.empty:
+    try:
+        tickers = list(STOCK_POOL.values())
+        # Multi-ticker bulk download for super-fast scanning
+        batch_data = yf.download(tickers, period="5d", interval="1d", group_by='ticker', progress=False)
+        
+        found_stocks = []
+        for name, symbol in STOCK_POOL.items():
+            try:
+                df = batch_data[symbol] if len(tickers) > 1 else batch_data
+                df = df.dropna()
+                if df.empty:
+                    continue
+                
+                df = clean_df(df)
+                close = float(df['Close'].iloc[-1])
+                
+                if close <= max_price:
+                    sl = round(close * 0.98, 2)
+                    target = round(close * 1.04, 2)
+                    found_stocks.append(f"📌 **{name}**\n• CMP: ₹{close:.2f}\n• Target: ₹{target}\n• SL: ₹{sl}\n")
+            except:
                 continue
-            
-            df = clean_df(df)
-            close = float(df['Close'].iloc[-1])
-            
-            if close <= max_price:
-                high = float(df['High'].iloc[-1])
-                low = float(df['Low'].iloc[-1])
-                sl = round(close * 0.98, 2)
-                target = round(close * 1.04, 2)
-                found_stocks.append(f"📌 **{name}**\n• CMP: ₹{close:.2f}\n• Target: ₹{target}\n• SL: ₹{sl}\n")
-        except:
-            continue
 
-    if found_stocks:
-        response = f"🎯 **Stocks Under ₹{int(max_price)}:**\n\n" + "\n".join(found_stocks[:5])
-        bot.reply_to(message, response, parse_mode='Markdown')
-    else:
-        bot.reply_to(message, f"❌ ₹{int(max_price)} ke niche koi stock nahi mila.")
+        if found_stocks:
+            response = f"🎯 **Stocks Under ₹{int(max_price)}:**\n\n" + "\n".join(found_stocks[:5])
+            bot.reply_to(message, response, parse_mode='Markdown')
+        else:
+            bot.reply_to(message, f"❌ ₹{int(max_price)} ke niche koi stock nahi mila.")
 
-print("🚀 Level-Based Target/SL Bot is running...")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {str(e)}")
+
+print("🚀 Fast Level Bot is running...")
 bot.polling()
