@@ -1,18 +1,17 @@
-import telebot
+import os
+import re
+import threading
 import yfinance as yf
 import pandas as pd
-import requests
-import re
-import os
+import telebot
 from flask import Flask
-import threading
 
-# Flask Keep-Alive Server
-app = Flask('')
+# Flask web server for Render health checks
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Dynamic NSE Market Screener Bot is Active!"
+    return "Bot is running!"
 
 def run():
     port = int(os.environ.get("PORT", 10000))
@@ -24,7 +23,7 @@ def keep_alive():
 
 keep_alive()
 
-# Telegram Bot Token (Render Environment Variable)
+# Telegram Bot Token
 TELEGRAM_BOT_TOKEN = "8650177978:AAFwygvU4vmvU-h_ML3MoGrHJ9LcBzn1jBE"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
@@ -35,64 +34,88 @@ def clean_df(df):
 
 # Reliable NSE Market Pool
 NSE_TICKERS = [
-    # Under ₹100 / Low Cap
-    "YESBANK.NS", "SUZLON.NS", "IDFCFIRSTB.NS", "SOUTHBANK.NS", "UCOBANK.NS",
-    "IOB.NS", "NHPC.NS", "IRFC.NS", "HUDCO.NS", "SJVN.NS", "SWSOLAR.NS",
-    "PNB.NS", "IDEA.NS", "ZOMATO.NS", "JIOFIN.NS", "IOC.NS", "TATASTEEL.NS",
-    # Mid & Large Cap
-    "TATAMOTORS.NS", "RELIANCE.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS",
-    "ICICIBANK.NS", "ITC.NS", "COALINDIA.NS", "ONGC.NS", "BPCL.NS",
-    "NTPC.NS", "POWERGRID.NS", "GAIL.NS", "FEDERALBNK.NS", "ASHOKLEY.NS",
-    "TCS.NS", "BHARTIARTL.NS", "AXISBANK.NS", "WIPRO.NS", "LT.NS"
+    "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
+    "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LTIM.NS", "LT.NS",
+    "AXISBANK.NS", "KOTAKBANK.NS", "TATAMOTORS.NS", "TATASTEEL.NS",
+    "HINDUNILVR.NS", "ADANIENT.NS", "ADANIPORTS.NS", "BAJFINANCE.NS",
+    "POWERGRID.NS", "NTPC.NS", "COALINDIA.NS", "ONGC.NS", "IOC.NS",
+    "BPCL.NS", "GAIL.NS", "NMDC.NS", "SAIL.NS", "BHEL.NS",
+    "IRFC.NS", "RVNL.NS", "IRCON.NS", "HUDCO.NS", "NHPC.NS",
+    "SJVN.NS", "SUZLON.NS", "YESBANK.NS", "IDEA.NS", "ZOMATO.NS",
+    "JIOFIN.NS", "PAYTM.NS", "AWL.NS", "SOUTHBANK.NS", "UCOBANK.NS",
+    "IOB.NS", "CENTRALBK.NS", "BANKBARODA.NS", "PNB.NS", "CANBK.NS"
 ]
 
-@bot.message_handler(func=lambda message: message.text and message.text.upper() in ['NIFTY', 'BANKNIFTY', 'NIFTY 50', 'BANK NIFTY'])
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    help_text = (
+        "🤖 *Trading Signal Bot Active!*\n\n"
+        "📍 *Available Commands:*\n"
+        "• Type `NIFTY` or `BANKNIFTY` -> Get Live Option Signal (CE/PE, Entry, TG, SL)\n"
+        "• Type `under 100`, `under 500` -> Get Top Momentum Stocks"
+    )
+    bot.reply_to(message, help_text, parse_mode='Markdown')
+
+# NIFTY & BANKNIFTY Signal Handler
+@bot.message_handler(func=lambda m: m.text and m.text.upper() in ['NIFTY', 'BANKNIFTY'])
 def handle_index(message):
-    text = message.text.upper()
-    ticker = "^NSEI" if "NIFTY" in text and "BANK" not in text else "^NSEBANK"
-    index_name = "NIFTY 50" if ticker == "^NSEI" else "BANK NIFTY"
-    
-    bot.reply_to(message, f"⏳ **{index_name}** live analysis loading...")
-    
     try:
-        data = yf.download(ticker, period="5d", interval="1d", progress=False)
-        if data.empty:
-            bot.reply_to(message, f"❌ {index_name} ka data fetch nahi ho paya.")
+        index_name = message.text.upper()
+        symbol = "^NSEI" if index_name == "NIFTY" else "^NSEBANK"
+        
+        bot.reply_to(message, f"📊 Fetching Live Analysis for {index_name}...")
+        
+        df = yf.download(symbol, period="5d", interval="15m", progress=False)
+        df = clean_df(df)
+        
+        if df.empty:
+            bot.reply_to(message, "⚠️ Market data abhi available nahi hai.")
             return
 
-        data = clean_df(data)
-        latest_close = float(data['Close'].iloc[-1])
-        prev_close = float(data['Close'].iloc[-2]) if len(data) > 1 else latest_close
-        change = latest_close - prev_close
-        p_change = (change / prev_close) * 100
-
-        high = float(data['High'].iloc[-1])
-        low = float(data['Low'].iloc[-1])
+        cmp = float(df['Close'].iloc[-1])
         
-        pivot = (high + low + latest_close) / 3
-        r1 = (2 * pivot) - low
-        s1 = (2 * pivot) - high
+        if index_name == "NIFTY":
+            atm = round(cmp / 50) * 50
+            sl_pts, tg_pts = 30, 60
+        else:
+            atm = round(cmp / 100) * 100
+            sl_pts, tg_pts = 70, 150
 
-        reply = (
-            f"📊 **{index_name} Technical Levels**\n\n"
-            f"🔹 **CMP:** ₹{latest_close:.2f} ({'+' if change >= 0 else ''}{change:.2f} | {p_change:.2f}%)\n"
-            f"📈 **Day High:** ₹{high:.2f}\n"
-            f"📉 **Day Low:** ₹{low:.2f}\n\n"
-            f"🎯 **Pivot Points:**\n"
-            f"• **Resistance (R1):** ₹{r1:.2f}\n"
-            f"• **Pivot Level:** ₹{pivot:.2f}\n"
-            f"• **Support (S1):** ₹{s1:.2f}"
+        ema9 = df['Close'].ewm(span=9).mean().iloc[-1]
+        
+        if cmp >= ema9:
+            signal = "BUY CALL (CE)"
+            strike = f"{atm} CE"
+            target = cmp + tg_pts
+            sl = cmp - sl_pts
+        else:
+            signal = "BUY PUT (PE)"
+            strike = f"{atm} PE"
+            target = cmp - tg_pts
+            sl = cmp + sl_pts
+
+        response = (
+            f"🎯 *{index_name} OPTION TRADE SIGNAL*\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Index CMP:* `{cmp:.2f}`\n"
+            f"💡 *Signal:* *{signal}*\n"
+            f"🎯 *Suggested Strike:* `{strike}`\n\n"
+            f"📥 *Entry Zone:* `{cmp - 10:.2f} - {cmp + 10:.2f}`\n"
+            f"🎯 *Target:* `{target:.2f}`\n"
+            f"🛑 *Stop Loss:* `{sl:.2f}`\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ *Note:* For paper trading & educational purpose only."
         )
-        bot.reply_to(message, reply, parse_mode='Markdown')
+        bot.reply_to(message, response, parse_mode='Markdown')
 
     except Exception as e:
-        bot.reply_to(message, f"❌ Error: {str(e)}")
+        bot.reply_to(message, f"❌ Error analyzing {message.text}: {str(e)}")
 
-@bot.message_handler(func=lambda message: message.text and "under" in message.text.lower())
-def handle_under_stocks(message):
+# Stocks Under Price Handler
+@bot.message_handler(func=lambda message: message.text and re.search(r'under\s+\d+', message.text, re.IGNORECASE))
+def handle_under_price(message):
     match = re.search(r'\d+', message.text)
     if not match:
-        bot.reply_to(message, "❌ Format: `under 100` ya `under 500` bhein.")
         return
         
     max_price = float(match.group())
