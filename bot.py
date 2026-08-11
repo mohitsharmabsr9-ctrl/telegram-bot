@@ -25,7 +25,7 @@ def keep_alive():
 keep_alive()
 
 # Telegram Bot Token (Render Environment Variable)
-TELEGRAM_BOT_TOKEN = os.environ.get("8650177978:AAFwygvU4vmvU-h_ML3MoGrHJ9LcBzn1jBE")
+TELEGRAM_BOT_TOKEN = "8650177978:AAFwygvU4vmvU-h_ML3MoGrHJ9LcBzn1jBE"
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 def clean_df(df):
